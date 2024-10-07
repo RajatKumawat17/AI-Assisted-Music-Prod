@@ -16,6 +16,10 @@ class LyricsService {
     required String language,
     required String genre,
     required String description,
+    List<String> emotions = const [],
+    String? previousLyrics,
+    int versionCount = 1,
+    Map<String, dynamic>? musicalElements,
   }) async* {
     try {
       final request = http.Request(
@@ -28,15 +32,17 @@ class LyricsService {
         'language': language,
         'genre': genre,
         'description': description,
+        'emotions': emotions,
+        'previous_lyrics': previousLyrics,
+        'version_count': versionCount,
+        'musical_elements': musicalElements,
       });
 
       final streamedResponse = await http.Client().send(request);
 
       if (streamedResponse.statusCode == 200) {
-        var buffer = '';
         await for (var chunk in streamedResponse.stream.transform(utf8.decoder)) {
-          buffer += chunk;
-          yield buffer;
+          yield chunk;
         }
       } else {
         final errorBody = await streamedResponse.stream.transform(utf8.decoder).join();
@@ -300,31 +306,54 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
   final TextEditingController _languageController = TextEditingController();
   final TextEditingController _genreController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _lyricsController = TextEditingController();
+  final List<TextEditingController> _lyricsControllers = [
+    TextEditingController(),
+    TextEditingController(),
+    TextEditingController(),
+  ];
   bool _isLoading = false;
   Stream<String>? _lyricsStream;
   StreamSubscription<String>? _lyricsSubscription;
+  
+  List<String> selectedEmotions = [];
+  int selectedVersionCount = 1;
+  Map<String, dynamic> musicalElements = {
+    'melody_style': '',
+    'harmony_type': '',
+    'instruments': <String>[],
+    'tempo': '',
+  };
+
+  final List<String> availableEmotions = [
+    'Happy', 'Sad', 'Energetic', 'Calm', 'Romantic', 
+    'Angry', 'Nostalgic', 'Hopeful', 'Mysterious', 'Funny'
+  ];
+
+  final List<String> availableInstruments = [
+    'Piano', 'Guitar', 'Drums', 'Bass', 'Strings',
+    'Synthesizer', 'Violin', 'Trumpet', 'Saxophone', 'Flute'
+  ];
 
   final List<Map<String, dynamic>> _features = [
     {
       'icon': Icons.music_note,
-      'title': 'AI-Powered Lyrics Generation',
-      'description': 'Create unique lyrics in any language and genre using advanced AI technology',
+      'title': 'Multi-Version Generation',
+      'description': 'Create multiple versions of lyrics with different emotional tones',
+    },
+    {
+      'icon': Icons.piano,
+      'title': 'Musical Elements',
+      'description': 'Specify melody, harmony, and instrumental arrangements',
+    },
+    {
+      'icon': Icons.edit,
+      'title': 'Iterative Refinement',
+      'description': 'Refine and improve generated lyrics through multiple iterations',
     },
     {
       'icon': Icons.language,
       'title': 'Multi-Language Support',
-      'description': 'Generate lyrics in multiple languages to reach a global audience',
-    },
-    {
-      'icon': Icons.category,
-      'title': 'Genre Versatility',
-      'description': 'Create lyrics across various musical genres, from pop to classical',
-    },
-    {
-      'icon': Icons.autorenew,
-      'title': 'Real-Time Generation',
-      'description': 'Watch your lyrics come to life with real-time streaming generation',
+      'description': 'Generate lyrics in any language of your choice',
     },
   ];
 
@@ -333,61 +362,241 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
     _languageController.dispose();
     _genreController.dispose();
     _descriptionController.dispose();
-    _lyricsController.dispose();
+    for (var controller in _lyricsControllers) {
+      controller.dispose();
+    }
     _lyricsSubscription?.cancel();
     super.dispose();
   }
 
-  Future<void> _generateLyrics() async {
-    if (_languageController.text.isEmpty ||
-        _genreController.text.isEmpty ||
-        _descriptionController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please fill in all fields before generating lyrics'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.red.shade400,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  Widget _buildEmotionSelector() {
+    return Wrap(
+      spacing: 8.0,
+      runSpacing: 4.0,
+      children: availableEmotions.map((emotion) {
+        final isSelected = selectedEmotions.contains(emotion);
+        return FilterChip(
+          label: Text(emotion),
+          selected: isSelected,
+          onSelected: (selected) {
+            setState(() {
+              if (selected) {
+                if (selectedEmotions.length < 3) {
+                  selectedEmotions.add(emotion);
+                }
+              } else {
+                selectedEmotions.remove(emotion);
+              }
+            });
+          },
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildMusicalElements() {
+    return Card(
+      color: Colors.black38,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Melody Style',
+                hintText: 'e.g., Upbeat, Melancholic, Flowing',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) => musicalElements['melody_style'] = value,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Harmony Type',
+                hintText: 'e.g., Simple, Complex, Jazz-inspired',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) => musicalElements['harmony_type'] = value,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Select Instruments:',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 4.0,
+              children: availableInstruments.map((instrument) {
+                final isSelected = (musicalElements['instruments'] as List<String>).contains(instrument);
+                return FilterChip(
+                  label: Text(instrument),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        (musicalElements['instruments'] as List<String>).add(instrument);
+                      } else {
+                        (musicalElements['instruments'] as List<String>).remove(instrument);
+                      }
+                    });
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Tempo',
+                hintText: 'e.g., Fast, Moderate, Slow, 120 BPM',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) => musicalElements['tempo'] = value,
+            ),
+          ],
         ),
-      );
-      return;
+      ),
+    );
+  }
+
+  Future<void> _generateLyrics() async {
+  if (_languageController.text.isEmpty ||
+      _genreController.text.isEmpty ||
+      _descriptionController.text.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Please fill in all required fields'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red.shade400,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+    return;
+  }
+
+  await _lyricsSubscription?.cancel();
+
+  setState(() {
+    _isLoading = true;
+    for (var controller in _lyricsControllers) {
+      controller.clear();
     }
+    
+    _lyricsStream = LyricsService.generateLyrics(
+      language: _languageController.text,
+      genre: _genreController.text,
+      description: _descriptionController.text,
+      emotions: selectedEmotions,
+      previousLyrics: _lyricsControllers[0].text.isNotEmpty ? _lyricsControllers[0].text : null,
+      versionCount: selectedVersionCount,
+      musicalElements: musicalElements,
+    );
+  });
 
-    await _lyricsSubscription?.cancel();
+  int currentVersion = 0;
+  String buffer = '';
 
-    setState(() {
-      _isLoading = true;
-      _lyricsController.clear();
-      _lyricsStream = LyricsService.generateLyrics(
-        language: _languageController.text,
-        genre: _genreController.text,
-        description: _descriptionController.text,
-      );
-    });
+  _lyricsSubscription = _lyricsStream?.listen(
+    (data) {
+      if (mounted) {
+        if (data.startsWith('Version')) {
+          // Extract version number and update current version
+          final versionMatch = RegExp(r'Version (\d+):').firstMatch(data);
+          if (versionMatch != null) {
+            currentVersion = int.parse(versionMatch.group(1)!) - 1;
+            // Clear any existing content in this version's controller
+            _lyricsControllers[currentVersion].clear();
+          }
+          buffer = '';  // Clear buffer for new version
+        }
+        
+        // Add new data to buffer
+        buffer += data;
+        
+        // Update the current version's controller
+        setState(() {
+          _lyricsControllers[currentVersion].text = buffer;
+        });
+      }
+    },
+    onDone: () {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    },
+    onError: (error) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _lyricsControllers[0].text = 'Error: $error';
+        });
+      }
+    },
+  );
+}
 
-    _lyricsSubscription = _lyricsStream?.listen(
-      (data) {
-        if (mounted) {
-          setState(() {
-            _lyricsController.text = data;
-          });
-        }
-      },
-      onDone: () {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      },
-      onError: (error) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _lyricsController.text = 'Error: $error';
-          });
-        }
-      },
+  Widget _buildLyricsVersions() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            const Text('Number of versions: '),
+            DropdownButton<int>(
+              value: selectedVersionCount,
+              items: [1, 2, 3].map((int value) {
+                return DropdownMenuItem<int>(
+                  value: value,
+                  child: Text(value.toString()),
+                );
+              }).toList(),
+              onChanged: (int? newValue) {
+                setState(() {
+                  selectedVersionCount = newValue!;
+                });
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        ...List.generate(selectedVersionCount, (index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16.0),
+            child: Card(
+              color: Colors.black38,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Version ${index + 1}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _lyricsControllers[index],
+                      maxLines: null,
+                      minLines: 10,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.black12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -395,24 +604,37 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
     required TextEditingController controller,
     required String label,
     required String hint,
+    Widget? extraContent,
   }) {
     return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 24),
           AutoSlidingFeatureCarousel(features: _features),
-          const SizedBox(height: 32),
-          _buildCenteredCard(
-            child: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                labelText: label,
-                hintText: hint,
-                border: const OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                ),
-                filled: true,
-                fillColor: Colors.black12,
+          const SizedBox(height: 24),
+          Card(
+            color: Colors.black38,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: controller,
+                    decoration: InputDecoration(
+                      labelText: label,
+                      hintText: hint,
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.black12,
+                    ),
+                  ),
+                  if (extraContent != null) ...[
+                    const SizedBox(height: 16),
+                    extraContent,
+                  ],
+                ],
               ),
             ),
           ),
@@ -423,89 +645,75 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
 
   Widget _buildLyricsTab() {
     return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 32),
-          _buildCenteredCard(
-            child: Column(
-              children: [
-                TextField(
-                  controller: _descriptionController,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Describe your song',
-                    hintText: 'Enter theme, mood, or story of your song',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                    ),
-                    filled: true,
-                    fillColor: Colors.black12,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _generateLyrics,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: _isLoading
-                      ? const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            ),
-                            SizedBox(width: 8),
-                            Text('Generating...'),
-                          ],
-                        )
-                      : const Text('Create/Update Lyrics'),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _lyricsController,
-                  maxLines: null,
-                  minLines: 10,
-                  readOnly: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Generated Lyrics',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                    ),
-                    filled: true,
-                    fillColor: Colors.black12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCenteredCard({required Widget child}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 800),
-          child: Card(
+          Card(
             color: Colors.black38,
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: child,
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Emotional Tones (Select up to 3):',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildEmotionSelector(),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _descriptionController,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Describe your song',
+                      hintText: 'Enter theme, mood, or story of your song',
+                      border: OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.black12,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _generateLyrics,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text('Generating...'),
+                            ],
+                          )
+                        : const Text('Generate Lyrics'),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 24),
+          _buildLyricsVersions(),
+        ],
       ),
     );
   }
@@ -515,12 +723,11 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
     return Scaffold(
       body: AnimatedBackground(
         child: DefaultTabController(
-          length: 3,
+          length: 4,
           child: Scaffold(
             backgroundColor: Colors.transparent,
             appBar: AppBar(
               backgroundColor: Colors.black38,
-              elevation: 0,
               title: const Text(
                 'AI Music Production',
                 style: TextStyle(fontWeight: FontWeight.bold),
@@ -529,6 +736,7 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
                 tabs: [
                   Tab(text: 'Language'),
                   Tab(text: 'Genre'),
+                  Tab(text: 'Musical Elements'),
                   Tab(text: 'Lyrics'),
                 ],
                 indicatorSize: TabBarIndicatorSize.label,
@@ -546,6 +754,16 @@ class _MusicProductionHomeState extends State<MusicProductionHome> {
                   controller: _genreController,
                   label: 'Enter Genre',
                   hint: 'e.g., Pop, Rock, Jazz',
+                ),
+                SingleChildScrollView(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      AutoSlidingFeatureCarousel(features: _features),
+                      const SizedBox(height: 24),
+                      _buildMusicalElements(),
+                    ],
+                  ),
                 ),
                 _buildLyricsTab(),
               ],

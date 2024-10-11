@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'package:aimusicprod/config/environment.dart';
 
 void main() {
   runApp(const MusicProductionApp());
@@ -10,7 +11,10 @@ void main() {
 
 // Lyrics Service
 class LyricsService {
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:8000',
+  );
 
   static Stream<String> generateLyrics({
     required String language,
@@ -22,11 +26,9 @@ class LyricsService {
     Map<String, dynamic>? musicalElements,
   }) async* {
     try {
-      final request = http.Request(
-        'POST',
-        Uri.parse('$baseUrl/api/generate_lyrics'),
-      );
-
+      final uri = Uri.parse('$baseUrl/api/generate_lyrics');  // Fixed URL formation
+      
+      final request = http.Request('POST', uri);
       request.headers['Content-Type'] = 'application/json';
       request.body = json.encode({
         'language': language,
@@ -46,7 +48,7 @@ class LyricsService {
         }
       } else {
         final errorBody = await streamedResponse.stream.transform(utf8.decoder).join();
-        throw Exception('Failed to generate lyrics: $errorBody');
+        throw Exception('Server error: ${streamedResponse.statusCode} - $errorBody');
       }
     } catch (e) {
       yield 'Error generating lyrics: $e';
